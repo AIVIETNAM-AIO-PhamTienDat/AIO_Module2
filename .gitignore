@@ -6,5 +6,7 @@ __pycache__/
 Thumbs.db
 docs/
 archive/
+report_assets/
+*.zip
 *.md
 !README.md

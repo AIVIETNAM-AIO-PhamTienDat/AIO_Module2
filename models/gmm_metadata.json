@@ -1,0 +1,59 @@
+{
+  "model_type": "GaussianMixture",
+  "country_scope": "United Kingdom",
+  "source_file": "data/processed/rfm_uk_full.csv",
+  "random_state": 42,
+  "n_components": 10,
+  "feature_columns": [
+    "Recency",
+    "Frequency",
+    "Monetary"
+  ],
+  "transform_rule": "np.log1p applied to Frequency and Monetary, Recency kept raw, then StandardScaler",
+  "selection_reason": "AIC and BIC were evaluated for K=2..10. Both metrics are lowest at K=10. The 10 technical clusters are mapped into three business groups for reporting and marketing actions.",
+  "aic_scores": {
+    "2": 23579.4257,
+    "3": 22604.5753,
+    "4": 7868.3624,
+    "5": 413.5516,
+    "6": 160.0708,
+    "7": -566.9792,
+    "8": -709.2926,
+    "9": -1182.618,
+    "10": -8518.3683
+  },
+  "bic_scores": {
+    "2": 23698.6094,
+    "3": 22786.4873,
+    "4": 8113.0026,
+    "5": 720.9201,
+    "6": 530.1675,
+    "7": -134.1542,
+    "8": -213.7394,
+    "9": -624.3365,
+    "10": -7897.3585
+  },
+  "ood_threshold_p01_log_likelihood": -7.246797,
+  "input_limits_p01_p99": {
+    "Recency_min": 2.0,
+    "Recency_max": 369.0,
+    "Frequency_min": 1.0,
+    "Frequency_max": 29.84999999999991,
+    "Monetary_min": 52.0,
+    "Monetary_max": 17282.3585,
+    "AverageOrderValue_min": 39.8625,
+    "AverageOrderValue_max": 1708.0359999999998
+  },
+  "cluster_mapping": {
+    "0": "Khách hàng bình thường",
+    "1": "Khách hàng bình thường",
+    "2": "Khách hàng bình thường",
+    "3": "Khách hàng VIP",
+    "4": "Khách hàng tiềm năng",
+    "5": "Khách hàng bình thường",
+    "6": "Khách hàng tiềm năng",
+    "7": "Khách hàng bình thường",
+    "8": "Khách hàng tiềm năng",
+    "9": "Khách hàng bình thường"
+  }
+}
