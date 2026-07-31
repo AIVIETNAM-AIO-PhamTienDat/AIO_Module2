@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import sys
 
 import joblib
 import numpy as np
@@ -21,6 +22,8 @@ st.set_page_config(
 )
 
 BASE_DIR = Path(__file__).resolve().parent
+MODEL_DIR = BASE_DIR / "models"
+MODEL_ROOT = MODEL_DIR if MODEL_DIR.exists() else BASE_DIR
 
 
 # =====================================================
@@ -283,16 +286,14 @@ def load_model_assets() -> dict[str, Any]:
     missing = [
         filename
         for filename in REQUIRED_MODEL_FILES.values()
-        if not (BASE_DIR / filename).exists()
+        if not (MODEL_ROOT / filename).exists()
     ]
 
     if missing:
-        raise FileNotFoundError(
-            "Thiếu các file mô hình: " + ", ".join(missing)
-        )
+        raise FileNotFoundError("Thiếu các file mô hình: " + ", ".join(missing))
 
     return {
-        key: joblib.load(BASE_DIR / filename)
+        key: joblib.load(MODEL_ROOT / filename)
         for key, filename in REQUIRED_MODEL_FILES.items()
     }
 
@@ -307,17 +308,16 @@ except Exception as exc:
     st.error("Không thể tải mô hình GMM.")
     st.code(str(exc))
     st.info(
-        "Hãy đặt file app này cùng thư mục với 4 file mô hình: "
+        "Hãy đặt 4 file mô hình vào thư mục `models/` bên cạnh file App.py: "
         "scaler_gmm.pkl, gmm.pkl, gmm_ood_threshold.pkl và gmm_input_limits.pkl."
     )
     st.stop()
+    sys.exit(1)
 
 
 # Kiểm tra đúng mô hình GMM 10 cụm
 if getattr(gmm, "n_components", None) != EXPECTED_GMM_COMPONENTS:
-    st.error(
-        "File gmm.pkl đang tải không phải mô hình GMM 10 cụm."
-    )
+    st.error("File gmm.pkl đang tải không phải mô hình GMM 10 cụm.")
     st.info(
         f"Mô hình hiện tại có {getattr(gmm, 'n_components', 'không xác định')} cụm. "
         "Hãy chạy lại notebook K = 10 và thay file gmm.pkl, scaler cùng các ngưỡng mới."
@@ -455,10 +455,7 @@ def predict_customer(
         return result
 
     # 2. Giá trị trung bình mỗi đơn rất cao và mua gần đây -> VIP.
-    if (
-        average_order_value >= VIP_AOV_THRESHOLD
-        and recency <= VIP_RECENCY_THRESHOLD
-    ):
+    if average_order_value >= VIP_AOV_THRESHOLD and recency <= VIP_RECENCY_THRESHOLD:
         result.update(
             {
                 "segment": "Khách hàng VIP",
@@ -509,10 +506,7 @@ def predict_customer(
         return result
 
     # 5. Chỉ mua một lần nhưng giá trị đơn lớn -> khách hàng tiềm năng.
-    if (
-        frequency <= ONE_TIME_FREQUENCY_MAX
-        and monetary >= ONE_TIME_MONETARY_THRESHOLD
-    ):
+    if frequency <= ONE_TIME_FREQUENCY_MAX and monetary >= ONE_TIME_MONETARY_THRESHOLD:
         result.update(
             {
                 "segment": "Khách hàng tiềm năng",
@@ -691,9 +685,7 @@ def render_prediction_result(result: dict[str, Any]) -> None:
         else "Quy tắc/kiểm tra ngoài mô hình"
     )
     confidence_text = (
-        f"{result['confidence']:.2%}"
-        if result["confidence"] is not None
-        else "—"
+        f"{result['confidence']:.2%}" if result["confidence"] is not None else "—"
     )
     average_value_text = (
         format_pound(float(result["average_order_value"]))
@@ -728,7 +720,9 @@ def render_prediction_result(result: dict[str, Any]) -> None:
     if result["probabilities"] is not None:
         probability_df = pd.DataFrame(
             {
-                "Cụm": [f"Cụm {index}" for index in range(len(result["probabilities"]))],
+                "Cụm": [
+                    f"Cụm {index}" for index in range(len(result["probabilities"]))
+                ],
                 "Xác suất": result["probabilities"],
             }
         ).set_index("Cụm")
@@ -809,12 +803,11 @@ with st.sidebar:
     st.caption("M — Monetary: tổng số tiền khách đã chi (£)")
 
 
-
 # =====================================================
 # 6. HERO
 # =====================================================
 
-hero_col, image_col = st.columns([0.95, 1.45], gap="large")
+hero_col = st.columns(1)[0]
 
 with hero_col:
     st.markdown(
@@ -848,12 +841,12 @@ with hero_col:
             unsafe_allow_html=True,
         )
 
-with image_col:
-    hero_image = next((path for path in image_candidates if path.exists()), None)
-    if hero_image:
-        st.image(str(hero_image), use_container_width=True)
-    else:
-        st.info("Đặt ảnh tiêu đề trong cùng thư mục với app để hiển thị ảnh đại diện.")
+# with image_col:
+#     hero_image = next((path for path in image_candidates if path.exists()), None)
+#     if hero_image:
+#         st.image(str(hero_image), use_container_width=True)
+#     else:
+#         st.info("Đặt ảnh tiêu đề trong cùng thư mục với app để hiển thị ảnh đại diện.")
 
 
 # =====================================================
@@ -982,7 +975,13 @@ with batch_tab:
         st.rerun()
 
     if classify_all:
-        required_columns = {"CustomerID", "CustomerName", "Recency", "Frequency", "Monetary"}
+        required_columns = {
+            "CustomerID",
+            "CustomerName",
+            "Recency",
+            "Frequency",
+            "Monetary",
+        }
         missing_columns = required_columns.difference(editor_data.columns)
 
         if missing_columns:
@@ -1003,10 +1002,16 @@ with batch_tab:
         ]
 
         total_customers = len(batch_results)
-        vip_count = batch_results["BusinessGroup"].str.contains("VIP", case=False, na=False).sum()
-        potential_count = batch_results["BusinessGroup"].str.contains(
-            "tiềm năng", case=False, na=False
-        ).sum()
+        vip_count = (
+            batch_results["BusinessGroup"]
+            .str.contains("VIP", case=False, na=False)
+            .sum()
+        )
+        potential_count = (
+            batch_results["BusinessGroup"]
+            .str.contains("tiềm năng", case=False, na=False)
+            .sum()
+        )
         warning_count = batch_results["Status"].isin(["warning", "caution"]).sum()
 
         summary_col_1, summary_col_2, summary_col_3, summary_col_4 = st.columns(4)
