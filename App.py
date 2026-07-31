@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-import sys
 
 import joblib
 import numpy as np
@@ -22,8 +21,6 @@ st.set_page_config(
 )
 
 BASE_DIR = Path(__file__).resolve().parent
-MODEL_DIR = BASE_DIR / "models"
-MODEL_ROOT = MODEL_DIR if MODEL_DIR.exists() else BASE_DIR
 
 
 # =====================================================
@@ -286,14 +283,16 @@ def load_model_assets() -> dict[str, Any]:
     missing = [
         filename
         for filename in REQUIRED_MODEL_FILES.values()
-        if not (MODEL_ROOT / filename).exists()
+        if not (BASE_DIR / filename).exists()
     ]
 
     if missing:
-        raise FileNotFoundError("Thiếu các file mô hình: " + ", ".join(missing))
+        raise FileNotFoundError(
+            "Thiếu các file mô hình: " + ", ".join(missing)
+        )
 
     return {
-        key: joblib.load(MODEL_ROOT / filename)
+        key: joblib.load(BASE_DIR / filename)
         for key, filename in REQUIRED_MODEL_FILES.items()
     }
 
@@ -308,16 +307,17 @@ except Exception as exc:
     st.error("Không thể tải mô hình GMM.")
     st.code(str(exc))
     st.info(
-        "Hãy đặt 4 file mô hình vào thư mục `models/` bên cạnh file App.py: "
+        "Hãy đặt file app này cùng thư mục với 4 file mô hình: "
         "scaler_gmm.pkl, gmm.pkl, gmm_ood_threshold.pkl và gmm_input_limits.pkl."
     )
     st.stop()
-    sys.exit(1)
 
 
 # Kiểm tra đúng mô hình GMM 10 cụm
 if getattr(gmm, "n_components", None) != EXPECTED_GMM_COMPONENTS:
-    st.error("File gmm.pkl đang tải không phải mô hình GMM 10 cụm.")
+    st.error(
+        "File gmm.pkl đang tải không phải mô hình GMM 10 cụm."
+    )
     st.info(
         f"Mô hình hiện tại có {getattr(gmm, 'n_components', 'không xác định')} cụm. "
         "Hãy chạy lại notebook K = 10 và thay file gmm.pkl, scaler cùng các ngưỡng mới."
@@ -455,7 +455,10 @@ def predict_customer(
         return result
 
     # 2. Giá trị trung bình mỗi đơn rất cao và mua gần đây -> VIP.
-    if average_order_value >= VIP_AOV_THRESHOLD and recency <= VIP_RECENCY_THRESHOLD:
+    if (
+        average_order_value >= VIP_AOV_THRESHOLD
+        and recency <= VIP_RECENCY_THRESHOLD
+    ):
         result.update(
             {
                 "segment": "Khách hàng VIP",
@@ -506,7 +509,10 @@ def predict_customer(
         return result
 
     # 5. Chỉ mua một lần nhưng giá trị đơn lớn -> khách hàng tiềm năng.
-    if frequency <= ONE_TIME_FREQUENCY_MAX and monetary >= ONE_TIME_MONETARY_THRESHOLD:
+    if (
+        frequency <= ONE_TIME_FREQUENCY_MAX
+        and monetary >= ONE_TIME_MONETARY_THRESHOLD
+    ):
         result.update(
             {
                 "segment": "Khách hàng tiềm năng",
@@ -677,57 +683,23 @@ def predict_customer(
 
 
 def render_prediction_result(result: dict[str, Any]) -> None:
+    """Chỉ hiển thị nhóm khách hàng và chiến lược đề xuất."""
+
     segment = str(result["segment"])
     card_class = segment_css_class(segment)
-    cluster_text = (
-        f"Cụm GMM {result['cluster']}"
-        if result["cluster"] is not None
-        else "Quy tắc/kiểm tra ngoài mô hình"
-    )
-    confidence_text = (
-        f"{result['confidence']:.2%}" if result["confidence"] is not None else "—"
-    )
-    average_value_text = (
-        format_pound(float(result["average_order_value"]))
-        if result["average_order_value"] is not None
-        else "—"
-    )
 
     st.markdown(
         f"""
         <div class="result-card {card_class}">
             <div class="result-label">KẾT QUẢ PHÂN NHÓM</div>
             <div class="result-title">{segment}</div>
-            <div style="color:#637294; line-height:1.65;">
-                {cluster_text} &nbsp;•&nbsp; Mức chắc chắn: <b>{confidence_text}</b>
-                &nbsp;•&nbsp; Giá trị trung bình/đơn: <b>{average_value_text}</b>
-            </div>
             <div style="margin-top:12px; color:#384b74; line-height:1.65;">
-                <b>Gợi ý hành động:</b> {recommendation_for(segment)}
+                <b>Chiến lược đề xuất:</b> {recommendation_for(segment)}
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-    if result["reasons"]:
-        for reason in result["reasons"]:
-            if result["status"] in {"warning", "caution"}:
-                st.warning(reason)
-            else:
-                st.info(reason)
-
-    if result["probabilities"] is not None:
-        probability_df = pd.DataFrame(
-            {
-                "Cụm": [
-                    f"Cụm {index}" for index in range(len(result["probabilities"]))
-                ],
-                "Xác suất": result["probabilities"],
-            }
-        ).set_index("Cụm")
-        st.markdown("#### Xác suất thuộc từng cụm")
-        st.bar_chart(probability_df, y="Xác suất", height=280)
 
 
 def sample_recent_customers() -> pd.DataFrame:
@@ -768,6 +740,7 @@ def classify_customer_table(customer_table: pd.DataFrame) -> pd.DataFrame:
                 "Monetary": row.get("Monetary"),
                 "AverageOrderValue": prediction.get("average_order_value"),
                 "BusinessGroup": prediction["segment"],
+                "Strategy": recommendation_for(prediction["segment"]),
                 "GMMCluster": prediction["cluster"],
                 "Confidence": confidence,
                 "Status": prediction["status"],
@@ -803,11 +776,12 @@ with st.sidebar:
     st.caption("M — Monetary: tổng số tiền khách đã chi (£)")
 
 
+
 # =====================================================
 # 6. HERO
 # =====================================================
 
-hero_col = st.columns(1)[0]
+hero_col, image_col = st.columns([0.95, 1.45], gap="large")
 
 with hero_col:
     st.markdown(
@@ -841,12 +815,12 @@ with hero_col:
             unsafe_allow_html=True,
         )
 
-# with image_col:
-#     hero_image = next((path for path in image_candidates if path.exists()), None)
-#     if hero_image:
-#         st.image(str(hero_image), use_container_width=True)
-#     else:
-#         st.info("Đặt ảnh tiêu đề trong cùng thư mục với app để hiển thị ảnh đại diện.")
+with image_col:
+    hero_image = next((path for path in image_candidates if path.exists()), None)
+    if hero_image:
+        st.image(str(hero_image), use_container_width=True)
+    else:
+        st.info("Đặt ảnh tiêu đề trong cùng thư mục với app để hiển thị ảnh đại diện.")
 
 
 # =====================================================
@@ -975,13 +949,7 @@ with batch_tab:
         st.rerun()
 
     if classify_all:
-        required_columns = {
-            "CustomerID",
-            "CustomerName",
-            "Recency",
-            "Frequency",
-            "Monetary",
-        }
+        required_columns = {"CustomerID", "CustomerName", "Recency", "Frequency", "Monetary"}
         missing_columns = required_columns.difference(editor_data.columns)
 
         if missing_columns:
@@ -1002,16 +970,10 @@ with batch_tab:
         ]
 
         total_customers = len(batch_results)
-        vip_count = (
-            batch_results["BusinessGroup"]
-            .str.contains("VIP", case=False, na=False)
-            .sum()
-        )
-        potential_count = (
-            batch_results["BusinessGroup"]
-            .str.contains("tiềm năng", case=False, na=False)
-            .sum()
-        )
+        vip_count = batch_results["BusinessGroup"].str.contains("VIP", case=False, na=False).sum()
+        potential_count = batch_results["BusinessGroup"].str.contains(
+            "tiềm năng", case=False, na=False
+        ).sum()
         warning_count = batch_results["Status"].isin(["warning", "caution"]).sum()
 
         summary_col_1, summary_col_2, summary_col_3, summary_col_4 = st.columns(4)
@@ -1030,18 +992,23 @@ with batch_tab:
             st.markdown("#### Phân bố nhóm khách hàng")
             st.bar_chart(distribution, y="Số lượng", height=300)
 
-        display_results = batch_results.copy()
+        # Chỉ hiển thị dữ liệu nhận diện, nhóm khách hàng và chiến lược.
+        # Các giá trị xác suất, cụm GMM, trạng thái và quy tắc vẫn có thể được
+        # dùng nội bộ nhưng không xuất hiện trên giao diện.
+        display_results = batch_results[
+            [
+                "CustomerID",
+                "CustomerName",
+                "Recency",
+                "Frequency",
+                "Monetary",
+                "BusinessGroup",
+                "Strategy",
+            ]
+        ].copy()
+
         display_results["Monetary"] = display_results["Monetary"].map(
             lambda value: format_pound(float(value)) if pd.notna(value) else "—"
-        )
-        display_results["AverageOrderValue"] = display_results["AverageOrderValue"].map(
-            lambda value: format_pound(float(value)) if pd.notna(value) else "—"
-        )
-        display_results["Confidence"] = display_results["Confidence"].map(
-            lambda value: f"{float(value):.2%}" if pd.notna(value) else "—"
-        )
-        display_results["GMMCluster"] = display_results["GMMCluster"].map(
-            lambda value: f"Cụm {int(value)}" if pd.notna(value) else "—"
         )
 
         display_results = display_results.rename(
@@ -1051,12 +1018,8 @@ with batch_tab:
                 "Recency": "Recency",
                 "Frequency": "Frequency",
                 "Monetary": "Monetary",
-                "AverageOrderValue": "Trung bình/đơn",
                 "BusinessGroup": "Nhóm khách hàng",
-                "GMMCluster": "Cụm GMM",
-                "Confidence": "Mức chắc chắn",
-                "Status": "Trạng thái",
-                "Note": "Ghi chú",
+                "Strategy": "Chiến lược",
             }
         )
 
@@ -1066,12 +1029,24 @@ with batch_tab:
             use_container_width=True,
             hide_index=True,
             column_config={
-                "Ghi chú": st.column_config.TextColumn(width="large"),
                 "Nhóm khách hàng": st.column_config.TextColumn(width="medium"),
+                "Chiến lược": st.column_config.TextColumn(width="large"),
             },
         )
 
-        csv_bytes = batch_results.to_csv(index=False).encode("utf-8-sig")
+
+        export_results = batch_results[
+            [
+                "CustomerID",
+                "CustomerName",
+                "Recency",
+                "Frequency",
+                "Monetary",
+                "BusinessGroup",
+                "Strategy",
+            ]
+        ].copy()
+        csv_bytes = export_results.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
             "⬇️ Tải kết quả phân nhóm CSV",
             data=csv_bytes,
