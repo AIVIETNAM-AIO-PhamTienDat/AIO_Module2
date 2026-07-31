@@ -21,8 +21,6 @@ st.set_page_config(
 )
 
 BASE_DIR = Path(__file__).resolve().parent
-MODEL_DIR = BASE_DIR / "models"
-ASSETS_DIR = BASE_DIR / "assets"
 
 
 # =====================================================
@@ -240,6 +238,32 @@ REQUIRED_MODEL_FILES = {
 
 EXPECTED_GMM_COMPONENTS = 10
 
+# Các quy tắc kinh doanh được xét trước GMM.
+# Khách không khớp quy tắc nào mới được chuyển sang mô hình phân cụm.
+LOW_VALUE_MONETARY_THRESHOLD = 100.0
+
+VIP_AOV_THRESHOLD = 1000.0
+VIP_RECENCY_THRESHOLD = 30.0
+VIP_FREQUENCY_THRESHOLD = 10.0
+VIP_MONETARY_THRESHOLD = 1000.0
+
+REACTIVATION_RECENCY_THRESHOLD = 90.0
+REACTIVATION_MONETARY_THRESHOLD = 5000.0
+
+ONE_TIME_FREQUENCY_MAX = 1.0
+ONE_TIME_MONETARY_THRESHOLD = 1000.0
+
+NEW_POTENTIAL_RECENCY_THRESHOLD = 15.0
+NEW_POTENTIAL_FREQUENCY_MAX = 3.0
+NEW_POTENTIAL_MONETARY_THRESHOLD = 500.0
+
+FREQUENT_CUSTOMER_THRESHOLD = 10.0
+LOW_AVERAGE_ORDER_VALUE_THRESHOLD = 50.0
+
+DORMANT_RECENCY_THRESHOLD = 180.0
+DORMANT_FREQUENCY_MAX = 2.0
+DORMANT_MONETARY_THRESHOLD = 500.0
+
 CLUSTER_MAPPING = {
     0: "Khách hàng bình thường",
     1: "Khách hàng bình thường",
@@ -259,7 +283,7 @@ def load_model_assets() -> dict[str, Any]:
     missing = [
         filename
         for filename in REQUIRED_MODEL_FILES.values()
-        if not (MODEL_DIR / filename).exists()
+        if not (BASE_DIR / filename).exists()
     ]
 
     if missing:
@@ -268,7 +292,7 @@ def load_model_assets() -> dict[str, Any]:
         )
 
     return {
-        key: joblib.load(MODEL_DIR / filename)
+        key: joblib.load(BASE_DIR / filename)
         for key, filename in REQUIRED_MODEL_FILES.items()
     }
 
@@ -284,8 +308,7 @@ except Exception as exc:
     st.code(str(exc))
     st.info(
         "Hãy đặt file app này cùng thư mục với 4 file mô hình: "
-        "`scaler_gmm.pkl`, `gmm.pkl`, `gmm_ood_threshold.pkl` "
-        "và `gmm_input_limits.pkl` trong thư mục `models`."
+        "scaler_gmm.pkl, gmm.pkl, gmm_ood_threshold.pkl và gmm_input_limits.pkl."
     )
     st.stop()
 
@@ -411,16 +434,151 @@ def predict_customer(
     average_order_value = monetary / frequency
     result["average_order_value"] = average_order_value
 
-    # Quy tắc kinh doanh đặc biệt đã có trong app gốc.
-    if frequency <= 1 and monetary >= 1000:
+    # =================================================
+    # QUY TẮC KINH DOANH ƯU TIÊN TRƯỚC GMM
+    # =================================================
+
+    # 1. Tổng chi tiêu quá thấp -> khách hàng bình thường.
+    if monetary <= LOW_VALUE_MONETARY_THRESHOLD:
         result.update(
             {
-                "segment": "Khách hàng mua một lần giá trị cao",
+                "segment": "Khách hàng bình thường",
                 "status": "success",
-                "reasons": ["Kết quả được xác định bằng quy tắc kinh doanh đặc biệt."],
+                "reasons": [
+                    "Quy tắc 1: tổng chi tiêu "
+                    f"{format_pound(monetary)} ≤ "
+                    f"{format_pound(LOW_VALUE_MONETARY_THRESHOLD)}, "
+                    "bất kể Recency và Frequency."
+                ],
             }
         )
         return result
+
+    # 2. Giá trị trung bình mỗi đơn rất cao và mua gần đây -> VIP.
+    if (
+        average_order_value >= VIP_AOV_THRESHOLD
+        and recency <= VIP_RECENCY_THRESHOLD
+    ):
+        result.update(
+            {
+                "segment": "Khách hàng VIP",
+                "status": "success",
+                "reasons": [
+                    "Quy tắc 2: giá trị trung bình mỗi đơn "
+                    f"{format_pound(average_order_value)} ≥ "
+                    f"{format_pound(VIP_AOV_THRESHOLD)} và Recency "
+                    f"{recency:.0f} ngày ≤ {VIP_RECENCY_THRESHOLD:.0f} ngày."
+                ],
+            }
+        )
+        return result
+
+    # 3. Mua gần đây, mua thường xuyên và tổng chi tiêu cao -> VIP.
+    if (
+        recency <= VIP_RECENCY_THRESHOLD
+        and frequency >= VIP_FREQUENCY_THRESHOLD
+        and monetary >= VIP_MONETARY_THRESHOLD
+    ):
+        result.update(
+            {
+                "segment": "Khách hàng VIP",
+                "status": "success",
+                "reasons": [
+                    "Quy tắc 3: Recency không quá 30 ngày, Frequency từ 10 đơn "
+                    "và Monetary từ £1.000."
+                ],
+            }
+        )
+        return result
+
+    # 4. Từng chi tiêu rất cao nhưng lâu chưa quay lại -> tiềm năng tái kích hoạt.
+    if (
+        recency >= REACTIVATION_RECENCY_THRESHOLD
+        and monetary >= REACTIVATION_MONETARY_THRESHOLD
+    ):
+        result.update(
+            {
+                "segment": "Khách hàng tiềm năng",
+                "status": "success",
+                "reasons": [
+                    "Quy tắc 4: Recency từ 90 ngày và Monetary từ £5.000; "
+                    "khách có giá trị lịch sử cao nhưng cần tái kích hoạt."
+                ],
+            }
+        )
+        return result
+
+    # 5. Chỉ mua một lần nhưng giá trị đơn lớn -> khách hàng tiềm năng.
+    if (
+        frequency <= ONE_TIME_FREQUENCY_MAX
+        and monetary >= ONE_TIME_MONETARY_THRESHOLD
+    ):
+        result.update(
+            {
+                "segment": "Khách hàng tiềm năng",
+                "status": "success",
+                "reasons": [
+                    "Quy tắc 5: khách mới mua một lần với Monetary từ £1.000; "
+                    "cần theo dõi khả năng mua lại trước khi xếp VIP."
+                ],
+            }
+        )
+        return result
+
+    # 6. Mua rất gần đây, ít đơn nhưng tổng chi tiêu khá cao -> tiềm năng.
+    if (
+        recency <= NEW_POTENTIAL_RECENCY_THRESHOLD
+        and frequency <= NEW_POTENTIAL_FREQUENCY_MAX
+        and monetary >= NEW_POTENTIAL_MONETARY_THRESHOLD
+    ):
+        result.update(
+            {
+                "segment": "Khách hàng tiềm năng",
+                "status": "success",
+                "reasons": [
+                    "Quy tắc 6: Recency không quá 15 ngày, Frequency không quá 3 đơn "
+                    "và Monetary từ £500."
+                ],
+            }
+        )
+        return result
+
+    # 7. Mua nhiều nhưng giá trị trung bình mỗi đơn thấp -> bình thường.
+    if (
+        frequency >= FREQUENT_CUSTOMER_THRESHOLD
+        and average_order_value <= LOW_AVERAGE_ORDER_VALUE_THRESHOLD
+    ):
+        result.update(
+            {
+                "segment": "Khách hàng bình thường",
+                "status": "success",
+                "reasons": [
+                    "Quy tắc 7: Frequency từ 10 đơn nhưng giá trị trung bình "
+                    "mỗi đơn không quá £50."
+                ],
+            }
+        )
+        return result
+
+    # 8. Lâu không mua, ít đơn và tổng chi tiêu thấp -> bình thường.
+    if (
+        recency >= DORMANT_RECENCY_THRESHOLD
+        and frequency <= DORMANT_FREQUENCY_MAX
+        and monetary <= DORMANT_MONETARY_THRESHOLD
+    ):
+        result.update(
+            {
+                "segment": "Khách hàng bình thường",
+                "status": "success",
+                "reasons": [
+                    "Quy tắc 8: Recency từ 180 ngày, Frequency không quá 2 đơn "
+                    "và Monetary không quá £500."
+                ],
+            }
+        )
+        return result
+
+    # Các trường hợp còn lại được phân nhóm bằng GMM; OOD chỉ dùng để cảnh báo.
 
     abnormal_reasons: list[str] = []
     abnormal_reasons.extend(
@@ -469,14 +627,12 @@ def predict_customer(
 
     if log_likelihood < ood_threshold:
         abnormal_reasons.append(
-            "Tổ hợp Recency, Frequency và Monetary nằm ngoài phân phối mà mô hình đã học."
+            "Tổ hợp Recency, Frequency và Monetary khác với phần lớn dữ liệu huấn luyện; "
+            "kết quả GMM nên được xem là tham khảo."
         )
 
-    if abnormal_reasons:
-        result["segment"] = "Chưa phân nhóm đáng tin cậy"
-        result["reasons"] = abnormal_reasons
-        return result
-
+    # Dữ liệu vượt phạm vi training không còn chặn kết quả.
+    # App vẫn phân cụm bằng GMM và chỉ hiển thị cảnh báo độ tin cậy.
     cluster = int(gmm.predict(scaled_customer)[0])
     probabilities = gmm.predict_proba(scaled_customer)[0]
     confidence = float(probabilities[cluster])
@@ -488,8 +644,8 @@ def predict_customer(
     )
 
     segment = CLUSTER_MAPPING.get(cluster, "Chưa xác định")
-    reasons: list[str] = []
-    status = "success"
+    reasons: list[str] = list(abnormal_reasons)
+    status = "caution" if abnormal_reasons else "success"
 
     if confidence < 0.60 or confidence_gap < 0.15:
         status = "caution"
@@ -637,10 +793,10 @@ with st.sidebar:
     st.caption("Ứng dụng phân nhóm khách hàng thương mại điện tử")
 
     image_candidates = [
-        ASSETS_DIR / "anh_gmm_cong_nghe.png",
-        ASSETS_DIR / "anh_tieu_de.png",
-        ASSETS_DIR / "ảnh_tiêu_đề.png",
-        ASSETS_DIR / "header.png",
+        BASE_DIR / "anh_gmm_cong_nghe.png",
+        BASE_DIR / "anh_tieu_de.png",
+        BASE_DIR / "ảnh_tiêu_đề.png",
+        BASE_DIR / "header.png",
     ]
     sidebar_image = next((path for path in image_candidates if path.exists()), None)
     if sidebar_image:
@@ -652,16 +808,6 @@ with st.sidebar:
     st.caption("F — Frequency: tổng số đơn hàng")
     st.caption("M — Monetary: tổng số tiền khách đã chi (£)")
 
-    st.markdown("---")
-    st.success("Mô hình đã được tải thành công")
-    st.caption(f"Số cụm GMM: {getattr(gmm, 'n_components', '—')}")
-    st.caption(f"Ngưỡng OOD: {ood_threshold:.4f}")
-
-    st.markdown("---")
-    st.markdown("**Quy tắc gộp cụm mới**")
-    st.caption("Cụm 3 → Khách hàng VIP")
-    st.caption("Cụm 4, 6, 8 → Khách hàng tiềm năng")
-    st.caption("Cụm 0, 1, 2, 5, 7, 9 → Khách hàng bình thường")
 
 
 # =====================================================
@@ -852,7 +998,7 @@ with batch_tab:
 
         valid_results = batch_results[
             ~batch_results["BusinessGroup"].isin(
-                ["Dữ liệu không hợp lệ", "Không thể dự đoán", "Chưa phân nhóm đáng tin cậy"]
+                ["Dữ liệu không hợp lệ", "Không thể dự đoán"]
             )
         ]
 
@@ -861,7 +1007,7 @@ with batch_tab:
         potential_count = batch_results["BusinessGroup"].str.contains(
             "tiềm năng", case=False, na=False
         ).sum()
-        warning_count = (batch_results["Status"] == "warning").sum()
+        warning_count = batch_results["Status"].isin(["warning", "caution"]).sum()
 
         summary_col_1, summary_col_2, summary_col_3, summary_col_4 = st.columns(4)
         summary_col_1.metric("Tổng khách hàng", f"{total_customers}")
