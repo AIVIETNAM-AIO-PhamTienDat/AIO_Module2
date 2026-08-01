@@ -46,6 +46,7 @@ pip install -r requirements.txt
 streamlit run App.py
 hoặc ấn trực tiếp vào link: https://aiomodule2.streamlit.app
 
+```
 Model hiện tại được train trên bảng RFM full-period của khách hàng United Kingdom. GMM dùng 10 cụm kỹ thuật, sau đó gộp thành 3 nhóm kinh doanh: khách hàng bình thường, khách hàng tiềm năng và khách hàng VIP.
 
 Preprocessing hiện tại: giữ nguyên `Recency`, dùng `log1p` cho `Frequency` và `Monetary`, sau đó chuẩn hóa bằng `StandardScaler`.
